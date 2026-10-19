@@ -1,0 +1,98 @@
+name: Reference Data OpenAPI compatibility
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    name: OpenAPI compatibility gate
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the proposed contract
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned validation tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            https://raw.githubusercontent.com/oasdiff/oasdiff/main/install.sh \
+            | version=1.11.7 sh -s /usr/local/bin
+          oasdiff --version
+          npm exec --yes @redocly/cli@1.34.2 -- --version
+
+      - name: Materialize the contract from the PR base commit
+        id: base
+        shell: bash
+        run: |
+          set -euo pipefail
+          contract='07-api/contracts/openapi/reference-data.yaml'
+          shared_contract='07-api/contracts/openapi/_shared.yaml'
+          base_directory="$RUNNER_TEMP/reference-data-base"
+          base_contract="$base_directory/reference-data.yaml"
+          mkdir -p "$base_directory"
+          git show "${{ github.event.pull_request.base.sha }}:$contract" > "$base_contract" || {
+            echo "::error::The Reference Data contract is missing from the PR base commit; compatibility cannot be evaluated."
+            exit 1
+          }
+          git show "${{ github.event.pull_request.base.sha }}:$shared_contract" > "$base_directory/_shared.yaml" || {
+            echo "::error::The shared OpenAPI dependency is missing from the PR base commit; compatibility cannot be evaluated."
+            exit 1
+          }
+          test -s "$base_contract" || {
+            echo "::error::The Reference Data contract extracted from the PR base commit is empty."
+            exit 1
+          }
+          echo "contract=$contract" >> "$GITHUB_OUTPUT"
+          echo "base_contract=$base_contract" >> "$GITHUB_OUTPUT"
+
+      - name: Validate the proposed OpenAPI document
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm exec --yes @redocly/cli@1.34.2 -- lint "${{ steps.base.outputs.contract }}"
+
+      - name: Produce the consumer-facing changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+          oasdiff changelog --format json -- \
+            "${{ steps.base.outputs.base_contract }}" \
+            "${{ steps.base.outputs.contract }}" \
+            > "$RUNNER_TEMP/reference-data.changelog.json"
+          test -s "$RUNNER_TEMP/reference-data.changelog.json" || {
+            echo "::error::oasdiff did not produce a changelog; the SemVer classification is unsafe."
+            exit 1
+          }
+
+      - name: Enforce OpenAPI semantic versioning
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/openapi/validate-semver.mjs \
+            --base "${{ steps.base.outputs.base_contract }}" \
+            --candidate "${{ steps.base.outputs.contract }}" \
+            --changelog "$RUNNER_TEMP/reference-data.changelog.json"
+
+      - name: Reject breaking API changes
+        if: success() || failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'Checking Reference Data for breaking changes with oasdiff v1.11.7.'
+          oasdiff breaking --fail-on ERR --format githubactions -- \
+            "${{ steps.base.outputs.base_contract }}" \
+            "${{ steps.base.outputs.contract }}"
+
+      - name: Run compatibility validator tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/openapi/tests/test-validate-semver.mjs
+          node scripts/openapi/tests/test-oasdiff-gate.mjs oasdiff
