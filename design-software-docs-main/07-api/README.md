@@ -17,6 +17,7 @@ Define lineamientos de API, autenticación y ubicación de contratos OpenAPI.
 | [authentication.md](./authentication.md) | Estrategia de autenticación y autorización | 🟡 |
 | [api-surface-map.md](./api-surface-map.md) | Inventario de endpoints detectados por servicio | 🟡 |
 | [openapi-contract-review.md](./openapi-contract-review.md) | Revisión de cobertura entre código y contratos OpenAPI | 🟡 |
+| [openapi-compatibility.md](./openapi-compatibility.md) | Reference Data OpenAPI SemVer and oasdiff compatibility gate | 🟡 |
 | [contracts/openapi/](./contracts/openapi/) | Contratos OpenAPI validados y publicables | 🔴 |
 
 ## Dónde va cada contrato
